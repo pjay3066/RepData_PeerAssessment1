@@ -1,25 +1,131 @@
 ---
-title: "Reproducible Research: Peer Assessment 1"
-output: 
-  html_document:
-    keep_md: true
+title: "Reproducible Research - Project 1"
+author: "Paulo José R. Rêgo"
+date: "11 de fevereiro de 2020"
+output: html_document
 ---
 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+##Getting the data  
+The following code loads the necessary libraries, downloads, unzips, and loads the data into a data frame named activity  
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
 
-## Loading and preprocessing the data
+#Creating a directory to work
+if(!dir.exists("reproducible"))
+    dir.create("reproducible")
+
+setwd("reproducible")
+
+download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip", destfile = "activitydata.zip")
+
+unzip("activitydata.zip")
+
+activity <- read.csv("~/R/reproducible/activity.csv")
+
+activity$date <- as.Date(activity$date)
+```
+
+## Question 1 - What is mean total number of steps taken per day?
+
+First, let's use dplyr to quickly summarise the table and group by date  
+```{r, message = FALSE, warning = FALSE}
+activityday <- select(activity, steps, date) %>% 
+                group_by(date) %>% 
+                summarise(totalSteps = sum(steps, na.rm = TRUE))
+```
+
+And then, use ggplot2 to plot the histogram  
+```{r, message = FALSE, warning = FALSE}
+histogram <- ggplot(data = activityday) +
+             geom_histogram(mapping = aes(x = totalSteps), bins = 20)
+summary(activityday$totalSteps)
+histogram
+```
+  
+  
+We can observe, most frequently, days with 0 steps (which could indicate a systemic problem) or about 10000 (which is around the daily recommended by the USA CDC for most adults https://www.cdc.gov/physicalactivity/basics/adults/). This is also confirmed by mean and median statistics.  
+
+## Question 2 - What is the average daily activity pattern?
 
 
+First, let's use dplyr to quickly summarise the table and group by interval
+```{r, message = FALSE, warning = FALSE}
+activityinterval <- select(activity, steps, interval) %>% 
+                group_by(interval) %>% 
+                summarise(average = mean(steps, na.rm = TRUE))
 
-## What is mean total number of steps taken per day?
+activityinterval[which.max(activityinterval$average),]
+qplot(interval,average, data = activityinterval, geom = "line")
+```
+  
+We can observe that the 5-minute interval between 8:35 and 8:40 has the highest average across all days with around 206 steps. The plot also tells ys that the number of steps spikes around that interval.  
 
+## Question 3 - Imputing missing values
+  
+First let's get a sense of how the NAs are distributed over the data
+```{r, message = FALSE, warning = FALSE}
 
+#Getting the weekdays for the data
+activity$day <- weekdays(activity$date)
+#Subsets only the missing data
+nas <- activity[is.na(activity$steps),]
 
-## What is the average daily activity pattern?
+#Shows how many rows have NA
+nrow(nas)
 
+#NAs by date
+nas %>% group_by(date) %>% summarise(n = n())
 
+#NAs by day of the week
+nas %>% group_by(day) %>% summarise(n = n())
+```
 
-## Imputing missing values
+We can infer that, since each date with NAs has the same (288) amount of missing info, each day with NAs is fully missing it's observations so, filling with the average steps for that day(0) will result in no difference in analysis. Since there are more weekdays with missing info than weekend days, if we fill NAs with the average for each interval, we risk altering the next analysis(average steps on weekdays vs weekend). A more neutral strategy might be filling NAs with the average for that interval on that weekday. 
 
+```{r, message = FALSE, warning = FALSE}
+#Creates a data frame with average steps for interval of each weekday
+avgintervalday <- activity %>% group_by(interval, day) %>%
+                  summarise(avgsteps = mean(steps, na.rm = T))
 
+#Merges the original dataframe with the average data
+activity2 <- merge(activity, avgintervalday, by.x = c("interval", "day"), by.y = c("interval", "day"))
 
-## Are there differences in activity patterns between weekdays and weekends?
+#Replace the NAs with the averages
+activity2$steps <- with(activity2, coalesce(as.numeric(steps), avgsteps))
+
+#Restores the order of the original dataframe
+activity2 <- activity2[order(activity2$date, activity2$interval, decreasing = FALSE),]
+
+#Summarizes new data by sum
+activityday2 <- select(activity2, steps, date) %>% 
+                group_by(date) %>% 
+                summarise(totalSteps = sum(steps, na.rm = TRUE))
+
+#Plots the new statistics and histogram
+histogram2 <- ggplot(data = activityday2) +
+             geom_histogram(mapping = aes(x = totalSteps), bins = 20)
+summary(activityday2$totalSteps)
+histogram2
+``` 
+  
+As expected, since there are few days of data missing, the results haven't changed that much
+
+## Question 4 - Are there differences in activity patterns between weekdays and weekends?
+```{r, warning = FALSE, message = FALSE}
+
+#Labeling the weekend and weekdays
+activity2$weekend <- as.factor(ifelse(weekdays(activity2$date, abbreviate = T) %in% c("sab", "dom"), yes = "weekend", no = "weekday"))
+
+#Summarizing the data
+activityweekend <- select(activity2, weekend, interval, steps) %>%
+                    group_by(weekend, interval) %>%
+                    summarise(avgsteps = mean(steps))
+#Plotting the data
+qplot(data = activityweekend, x = interval, y = avgsteps, facets = weekend~., geom = "line")
+```
+  
+We can observe that during weekdays, there's a peak of steps around 8:30 (going to work, maybe??) and the activity starts earlier overall. During weekends, the steps are more "evenly" distributed during the day.
+  
